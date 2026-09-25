@@ -77,6 +77,11 @@ jobs:
               ;;
           esac
 
+      - name: Debug GitHub OIDC claims
+        uses: github/actions-oidc-debugger@main
+        with:
+          audience: sts.amazonaws.com
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
@@ -124,3 +129,4 @@ jobs:
           if [ "$PLAN_EXIT_CODE" -eq 1 ]; then
             exit 1
           fi
+          
