@@ -1,6 +1,6 @@
 plugin "terraform" {
   enabled = true
-  present = "recommended"
+  preset = "recommended"
 }
 
 plugin "aws" {
