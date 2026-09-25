@@ -1,0 +1,111 @@
+name: Terraform CI
+
+on:
+    pull_request:
+        branches:
+            - develop
+            - staging
+            - main
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+    terraform-checks:
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout repository
+              uses: actions/checkout@v4
+
+            - name: Setup Terraform
+              uses: hashicorp/setup-terraform@v3
+              with:
+                terraform_version: 1.16.2
+            - name: Check Terraform formatting
+              run: terraform fmt -check -recursive
+            - name: Initialize Terraform for validation
+              run:
+                for environment in dev staging prod; do
+                  terraform -chdir=environments/$environment init -backend=false -input=false
+                done
+            - name: Terraform Validate
+              run:
+                for environment in dev staging prod; do
+                  terraform -chdir=environments/$environment validate
+                done
+            - name: Setup TFLint
+              uses: terraform-linters/setup-tflint@v6
+              with:
+                cache: true
+            - name: Initialize TFLint plugins
+              run: tflint --init
+            - name: Run TFLint
+              run:
+                for environment in dev staging prod; do
+                  tflint --chdir=environments/$environment --config="$GITHUB_WORKSPACE/.tflint.hcl"
+            - name: Install Checkor
+              run: python3 -m pip install checkov==3.3.19
+            - name: Run Checkov
+              run: checkov -d . --framework terraform
+            - name: Select Terraform environment
+              run: |
+                case "${{ github.base_ref }}" in
+                  develop)
+                    echo "TF_ENV=dev" >> "$GITHUB_ENV"
+                    ;;
+                  staging)
+                    echo "TF_ENV=staging" >> "$GITHUB_ENV"
+                    ;;
+                  main)
+                    echo "TF_ENV=prod" >> "$GITHUB_ENV"
+                    ;;
+                  *)
+                    echo "Unsupported target branch: ${{ github.base_ref }}"
+                    exit 1
+                    ;;
+                esac
+            - name: Configure AWS credentials
+              uses: aws-actions/configure-aws-credentials@v6.3.0
+              with:
+                role-to-assume: arn:aws:iam::222634382766:role/project-1-github-actions-terraform
+                aws-region: us-east-1
+                role-session-name: terraform-ci-${{ github.run_id }}
+                allowed-account-ids: 222634382766
+            - name: Verify AWS credentials
+              run: aws sts get-caller-identity
+            - name: Initialize Terraform Backend
+              run: terraform -chdir=environments/$TF_ENV init -reconfigure -input=false
+            - name: Terraform plan
+              shell: bash
+              run: |
+                set +e
+
+                terraform -chdir=environments/$TF_ENV plan \
+                  -input=false \
+                  -no-color \
+                  -detailed-exitcode
+
+                PLAN_EXIT_CODE=$?
+
+                set -e
+
+                if [ "$PLAN_EXIT_CODE" -eq 0 ]; then
+                  PLAN_RESULT="No changes"
+                elif [ "$PLAN_EXIT_CODE" -eq 2 ]; then
+                  PLAN_RESULT="Changes detected"
+                else
+                  PLAN_RESULT="Plan failed"
+                fi
+
+                {
+                  echo "### Terraform Plan Summary"
+                  echo ""
+                  echo "- Environment: \`$TF_ENV\`"
+                  echo "- Target branch: \`${{ github.base_ref }}\`"
+                  echo "- Result: **$PLAN_RESULT**"
+                } >> "$GITHUB_STEP_SUMMARY"
+
+                if [ "$PLAN_EXIT_CODE" -eq 1 ]; then
+                  exit 1
+                fi
