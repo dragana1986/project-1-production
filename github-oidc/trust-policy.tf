@@ -17,7 +17,7 @@ data "aws_iam_policy_document" "github_actions_trust" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:sub"
-      values   = ["repo:dragana1986/project-1-production:pull_request"]
+      values   = ["repo:dragana1986@187338634/project-1-production@1382310380:pull_request"]
     }
   }
 }
